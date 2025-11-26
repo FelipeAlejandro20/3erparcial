@@ -11,14 +11,28 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Configurar conexión a base de datos
-const pool = new Pool({
+// ---------- CONFIGURACIÓN DE CONEXIÓN A LA BD ----------
+// Usar DATABASE_URL si está presente (Render) o la config por piezas para docker-compose local
+let poolConfig;
+if (process.env.DATABASE_URL) {
+  // Render provee una connection string completa: postgres://user:pass@host:5432/dbname
+  poolConfig = {
+    connectionString: process.env.DATABASE_URL,
+    // Si al desplegar en Render obtienes errores de SSL, descomenta la línea ssl y vuelve a desplegar:
+    // ssl: { rejectUnauthorized: false }
+  };
+} else {
+  // Configuracion por defecto para ejecutar localmente con docker-compose
+  poolConfig = {
     host: process.env.DB_HOST || 'postgres-db',
     port: 5432,
-    database: 'crud_db',
-    user: 'postgres',
-    password: 'postgres'
-});
+    database: process.env.POSTGRES_DB || 'crud_db',
+    user: process.env.POSTGRES_USER || 'postgres',
+    password: process.env.POSTGRES_PASSWORD || 'postgres'
+  };
+}
+
+const pool = new Pool(poolConfig);
 
 // ------------------ RUTAS CRUD ------------------
 
@@ -28,6 +42,7 @@ app.get('/api/users', async (req, res) => {
         const result = await pool.query('SELECT * FROM users');
         res.json(result.rows);
     } catch (err) {
+        console.error('Error GET /api/users:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -40,8 +55,9 @@ app.get('/api/users/:id', async (req, res) => {
             'SELECT * FROM users WHERE id = $1',
             [id]
         );
-        res.json(result.rows[0]);
+        res.json(result.rows[0] || null);
     } catch (err) {
+        console.error('Error GET /api/users/:id:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -56,6 +72,7 @@ app.post('/api/users', async (req, res) => {
         );
         res.status(201).json(result.rows[0]);
     } catch (err) {
+        console.error('Error POST /api/users:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -69,8 +86,9 @@ app.put('/api/users/:id', async (req, res) => {
             'UPDATE users SET nombre=$1, correo=$2 WHERE id=$3 RETURNING *',
             [nombre, correo, id]
         );
-        res.json(result.rows[0]);
+        res.json(result.rows[0] || null);
     } catch (err) {
+        console.error('Error PUT /api/users/:id:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -82,18 +100,20 @@ app.delete('/api/users/:id', async (req, res) => {
         await pool.query('DELETE FROM users WHERE id = $1', [id]);
         res.json({ message: 'Usuario eliminado' });
     } catch (err) {
+        console.error('Error DELETE /api/users/:id:', err);
         res.status(500).json({ error: err.message });
     }
 });
 
-// Crear tabla si no existe
+// Crear tabla si no existe (se ejecuta al inicio)
 pool.query(`
     CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         nombre TEXT,
         correo TEXT
     )
-`).then(() => console.log('Tabla users lista'));
+`).then(() => console.log('Tabla users lista'))
+  .catch(err => console.error('Error creando tabla users:', err));
 
 // Iniciar servidor
 app.listen(PORT, () => {
